@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>File Upload and Visualization</title>
+  <script src="https://cdn.jsdelivr.net/npm/ol@v9.2.0/dist/ol.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v9.2.0/ol.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+  <style>
+    #map {
+      width: 100%;
+      height: 500px;
+    }
+  </style>
+</head>
+<body>
+  <input type="file" id="fileInput" />
+  <button id="uploadButton">Upload and Visualize</button>
+  <div id="map" class="map"></div>
+
+  <script>
+    var map = new ol.Map({
+      target: 'map',
+      layers: [
+        new ol.layer.Tile({
+          source: new ol.source.OSM()
+        })
+      ],
+      view: new ol.View({
+        center: ol.proj.fromLonLat([0, 0]),
+        zoom: 2
+      })
+    });
+
+    document.getElementById("uploadButton").addEventListener('click', function () {
+      var fileInput = document.getElementById('fileInput');
+      var file = fileInput.files[0];
+
+      if (!file) {
+        alert("Please select a file to upload.");
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onload = function (event) {
+        var data = event.target.result;
+        var extension = file.name.split('.').pop().toLowerCase();
+        processData(data, extension);
+      };
+      reader.onerror = function (event) {
+        console.error("File could not be read! Code " + event.target.error.code);
+      };
+      reader.readAsText(file);
+    });
+
+    function processData(data, extension) {
+      try {
+        if (extension === 'geojson') {
+          visualizeGeoJSON(data);
+        } else if (extension === 'csv') {
+          visualizeCSV(data);
+        } else {
+          console.error("Unsupported file format.");
+        }
+      } catch (error) {
+        console.error("Error processing file:", error);
+      }
+    }
+
+    function visualizeGeoJSON(data) {
+      try {
+        var geojson = JSON.parse(data);
+        
+        if (!geojson || !geojson.features || !Array.isArray(geojson.features)) {
+          console.error("Invalid GeoJSON data format.");
+          return;
+        }
+
+        var features = geojson.features.map(function (feature) {
+          var geometry = feature.geometry;
+          switch (geometry.type) {
+            case 'Point':
+              return new ol.Feature({
+                geometry: new ol.geom.Point(ol.proj.fromLonLat(geometry.coordinates))
+              });
+            case 'LineString':
+              return new ol.Feature({
+                geometry: new ol.geom.LineString(geometry.coordinates.map(function (coord) {
+                  return ol.proj.fromLonLat(coord);
+                }))
+              });
+            case 'Polygon':
+              return new ol.Feature({
+                geometry: new ol.geom.Polygon(geometry.coordinates.map(function (ring) {
+                  return ring.map(function (coord) {
+                    return ol.proj.fromLonLat(coord);
+                  });
+                }))
+              });
+            case 'MultiPolygon':
+              return new ol.Feature({
+                geometry: new ol.geom.MultiPolygon(geometry.coordinates.map(function (polygon) {
+                  return polygon.map(function (ring) {
+                    return ring.map(function (coord) {
+                      return ol.proj.fromLonLat(coord);
+                    });
+                  });
+                }))
+              });
+            default:
+              console.error("Unsupported geometry type:", geometry.type);
+              return null;
+          }
+        }).filter(Boolean);
+
+        var vectorSource = new ol.source.Vector({
+          features: features
+        });
+
+        var vectorLayer = new ol.layer.Vector({
+          source: vectorSource
+        });
+
+        map.addLayer(vectorLayer);
+
+      } catch (error) {
+        console.error("Error processing GeoJSON:", error);
+      }
+    }
+
+    function visualizeCSV(data) {
+      try {
+        Papa.parse(data, {
+          header: true,
+          complete: function (results) {
+            var features = results.data.map(function (row) {
+              var latitude = parseFloat(row.latitude);
+              var longitude = parseFloat(row.longitude);
+
+              if (!isNaN(latitude) && !isNaN(longitude)) {
+                return new ol.Feature({
+                  geometry: new ol.geom.Point(ol.proj.fromLonLat([longitude, latitude]))
+                });
+              } else {
+                console.error("Invalid latitude or longitude in CSV:", row);
+                return null;
+              }
+            }).filter(Boolean);
+
+            var vectorSource = new ol.source.Vector({
+              features: features
+            });
+
+            var vectorLayer = new ol.layer.Vector({
+              source: vectorSource
+            });
+
+            map.addLayer(vectorLayer);
+          },
+          error: function (error) {
+            console.error("Error parsing CSV:", error);
+          }
+        });
+      } catch (error) {
+        console.error("Error processing CSV:", error);
+      }
+    }
+  </script>
+</body>
+</html>
